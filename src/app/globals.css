@@ -1,26 +1,88 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* PlayStation design tokens — from DESIGN.md (getdesign add playstation) */
+  --color-ps-blue: #0070d1;
+  --color-ps-blue-pressed: #0064b7;
+  --color-ps-blue-active: #004d8d;
+  --color-ps-link-dark: #53b1ff;
+  --color-ps-link-light: #0064b7;
+  --color-ps-commerce: #d53b00;
+  --color-ps-warning: #c81b3a;
+  --color-ps-ink: #000000;
+  --color-ps-ink-deep: #121314;
+  --color-ps-ink-elevated: #181818;
+  --color-ps-surface-dark-elevated: #121314;
+  --color-ps-surface-dark-card: #181818;
+  --color-ps-canvas-light: #ffffff;
+  --color-ps-soft: #f3f3f3;
+  --color-ps-card: #f5f7fa;
+  --color-ps-ash: #cccccc;
+  --color-ps-mute: #6b6b6b;
+  --color-ps-body-light: rgba(0, 0, 0, 0.6);
+  --color-ps-body-dark: rgba(255, 255, 255, 0.7);
+  --color-ps-mute-dark: rgba(229, 229, 229, 0.55);
+  --color-ps-hairline-light: #f3f3f3;
+  --color-ps-hairline-dark: rgba(229, 229, 229, 0.2);
+
+  --font-sans: var(--font-inter), "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-display: var(--font-roboto), var(--font-inter), "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  background: var(--color-ps-canvas-light);
+  color: var(--color-ps-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-ps-blue);
+  color: #fff;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+@keyframes ps-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+.ps-pulse-dot {
+  animation: ps-pulse-dot 1.8s ease-in-out infinite;
+}
+
+@keyframes ps-spin {
+  to { transform: rotate(360deg); }
+}
+.ps-spin {
+  animation: ps-spin 0.9s linear infinite;
+}
+
+@keyframes ps-toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ps-toast-in {
+  animation: ps-toast-in 0.22s ease-out;
+}
+
+@keyframes ps-dialog-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ps-dialog-in {
+  animation: ps-dialog-in 0.2s ease-out;
 }

@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 /** 卡片左上角的服务图标:HTTP 服务抓 favicon,第三方应用取 .app 包内图标;失败显示占位 */
 export function ServiceIcon({ port, version }: { port: number; version: string | number }) {
+  const src = `/api/services/icon?port=${port}&v=${version}`;
+  return <IconImage key={src} src={src} />;
+}
+
+function IconImage({ src }: { src: string }) {
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [port, version]);
 
   if (failed) {
     return (
@@ -26,7 +30,7 @@ export function ServiceIcon({ port, version }: { port: number; version: string |
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={`/api/services/icon?port=${port}&v=${version}`}
+      src={src}
       onError={() => setFailed(true)}
       alt=""
       aria-hidden="true"

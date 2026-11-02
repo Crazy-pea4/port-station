@@ -24,11 +24,11 @@ export function ConfirmDialog({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !busy) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, busy]);
 
   if (!open) return null;
 
@@ -36,7 +36,7 @@ export function ConfirmDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
       <div
@@ -53,6 +53,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onClose}
+            disabled={busy}
             className="inline-flex h-11 items-center rounded-full border border-ps-ash px-6 text-[14px] font-bold tracking-[0.3px] text-ps-ink transition-colors active:bg-ps-soft"
           >
             取消
@@ -63,7 +64,7 @@ export function ConfirmDialog({
             disabled={busy}
             className="inline-flex h-11 items-center rounded-full bg-ps-warning px-6 text-[14px] font-bold tracking-[0.3px] text-white transition-colors active:bg-[#a5162f] disabled:opacity-60"
           >
-            {busy ? "删除中…" : confirmText}
+            {busy ? "关闭中…" : confirmText}
           </button>
         </div>
       </div>

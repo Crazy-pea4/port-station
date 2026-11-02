@@ -17,7 +17,7 @@ function formatTime(ts: number) {
 }
 
 export function ClosedServiceCard({ service, closedAt, starting, onDiscard, onRestart }: ClosedServiceCardProps) {
-  const restartable = service.restart !== undefined;
+  const restartable = !!service.restartId;
 
   return (
     <article className="flex flex-col rounded-lg border border-dashed border-ps-ash bg-white p-6">

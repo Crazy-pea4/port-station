@@ -94,7 +94,9 @@ export function ServiceCard({ service, onHide, onClose }: ServiceCardProps) {
         <button
           type="button"
           onClick={() => onClose(service)}
-          className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full border border-ps-ash px-5 text-[14px] font-bold tracking-[0.324px] text-ps-ink transition-colors hover:border-ps-warning hover:text-ps-warning active:bg-ps-soft"
+          disabled={service.targets.length !== service.pids.length || !service.targets.length}
+          title={service.targets.length !== service.pids.length ? "无法核对进程身份，请刷新后重试" : undefined}
+          className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-full border border-ps-ash px-5 text-[14px] font-bold tracking-[0.324px] text-ps-ink transition-colors hover:border-ps-warning hover:text-ps-warning active:bg-ps-soft disabled:cursor-not-allowed disabled:opacity-50"
         >
           <PowerIcon className="h-3.5 w-3.5" />
           关闭

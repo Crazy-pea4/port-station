@@ -8,6 +8,8 @@ import {
   packageProjectName,
 } from "@/lib/restart";
 import { updateSnapshot } from "@/lib/service-cache";
+import { checkRequest, sessionToken } from "@/lib/api-security";
+import { readProcessIdentities } from "@/lib/process-identity";
 import type { ServiceInfo, ServicesPayload } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +20,9 @@ function classify(command: string | undefined): "dev" | "app" {
   return "dev";
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = checkRequest(request);
+  if (denied) return denied;
   const checkedAt = new Date().toISOString();
   const selfPid = process.pid;
   const listeners = await scanListeners();
@@ -42,6 +46,7 @@ export async function GET() {
       byPort.set(l.port, {
         port: l.port,
         pids: l.pid !== undefined ? [l.pid] : [],
+        targets: [],
         process: l.process ?? "unknown",
         category: "dev",
         checkedAt,
@@ -63,13 +68,20 @@ export async function GET() {
   );
 
   const contexts = await captureLaunchContexts(services.flatMap((s) => s.pids));
+  let identities;
+  try {
+    identities = await readProcessIdentities(services.flatMap((s) => s.pids));
+  } catch {
+    return NextResponse.json({ error: "无法核对进程身份，请刷新后重试" }, { status: 503 });
+  }
   for (const s of services) {
+    s.targets = s.pids.flatMap((pid) => identities.get(pid) ? [identities.get(pid)!] : []);
     const ctx = s.pids.map((p) => contexts.get(p)).find((c) => c?.command);
     if (ctx) {
       s.command = ctx.command;
       s.category = classify(ctx.command);
       const { recipe, reason } = buildRestartRecipe(ctx);
-      s.restart = recipe;
+      s.restartable = !!recipe;
       s.noRestartReason = recipe ? undefined : reason;
 
       // 标题解析:项目名 → 网页标题 → 应用显示名 → 进程名
@@ -101,9 +113,10 @@ export async function GET() {
   updateSnapshot(services);
 
   const payload: ServicesPayload = {
+    sessionToken: sessionToken(),
     services,
     scanned: listeners.length,
     checkedAt,
   };
-  return NextResponse.json(payload);
+  return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
 }

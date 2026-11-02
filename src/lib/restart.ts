@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readlinkSync } from "node:fs";
 import path from "node:path";
-import type { RestartRecipe } from "./types";
+import { recipeError, type PackageManager, type RestartRecipe } from "./restart-recipe";
 
 function exec(cmd: string, args: string[], timeout: number): Promise<string> {
   return new Promise((resolve) => {
@@ -66,6 +66,23 @@ export interface LaunchContext {
   command?: string;
   cwd?: string;
   parentCommand?: string;
+  /** 仅来自保留边界的操作系统接口,绝不从 ps 字符串 split 得到 */
+  argv?: string[];
+}
+
+function readArgv(pid: number): string[] | undefined {
+  if (process.platform !== "linux") return;
+  try {
+    const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+    if (argv.at(-1) === "") argv.pop();
+    const executable = readlinkSync(`/proc/${pid}/exe`);
+    // 进程标题被改写时,第一项不再对应可执行文件,不得误当成真实 argv。
+    if (!argv[0] || path.basename(argv[0]) !== path.basename(executable)) return;
+    argv[0] = executable;
+    return argv;
+  } catch {
+    return;
+  }
 }
 
 export async function captureLaunchContexts(pids: number[]): Promise<Map<number, LaunchContext>> {
@@ -84,6 +101,7 @@ export async function captureLaunchContexts(pids: number[]): Promise<Map<number,
       command: own?.command,
       cwd: cwds.get(pid),
       parentCommand: parent?.command,
+      argv: readArgv(pid),
     });
   }
   return result;
@@ -91,6 +109,10 @@ export async function captureLaunchContexts(pids: number[]): Promise<Map<number,
 
 /** 从启动上下文推导重启配方;拿不到时返回原因(用于前端问号提示) */
 export function buildRestartRecipe(ctx: LaunchContext): { recipe?: RestartRecipe; reason?: string } {
+  const usable = (recipe: RestartRecipe) => {
+    const reason = recipeError(recipe);
+    return reason ? { reason } : { recipe };
+  };
   const cmd = ctx.command?.trim();
   if (!cmd) {
     return { reason: "未能读取到该进程的启动命令（进程刚启动或已退出）。" };
@@ -99,31 +121,21 @@ export function buildRestartRecipe(ctx: LaunchContext): { recipe?: RestartRecipe
   // 第三方应用:路径里含 xxx.app/,可用 `open <xxx.app>` 重新拉起
   const appMatch = cmd.match(/^(\/.*?\.app)\//i);
   if (appMatch) {
-    return { recipe: { kind: "app", appPath: appMatch[1] } };
+    return usable({ kind: "app", appPath: appMatch[1] });
   }
 
-  // npm/pnpm/yarn 等脚本启动:node 系框架会改写进程标题导致自身参数丢失,
-  // 但父进程(npm start / pnpm dev)原样保留,配合 cwd 可重启
-  const pm = ctx.parentCommand?.trim().match(/^(npm|pnpm|yarn|bun|npx)\b\s*(.*)$/);
+  // 只识别不带额外参数的完整项目脚本标题。ps 无法保留额外参数的边界。
+  const pm = ctx.parentCommand?.trim().match(/^(npm|pnpm|yarn|bun)\s+(?:run(?:-script)?\s+)?([\w@:.\/-]+)$/);
   if (pm && ctx.cwd) {
-    const command = `${pm[1]}${pm[2] ? " " + pm[2].trim() : ""}`.trim();
-    if (command.length <= 160) return { recipe: { kind: "script", cwd: ctx.cwd, command } };
+    return usable({ kind: "script", cwd: ctx.cwd, manager: pm[1] as PackageManager, script: pm[2], args: [] });
   }
 
-  // 直接以绝对路径启动的命令:argv 原样保留,可精确重启
-  if (cmd.startsWith("/")) {
-    const argv = cmd.split(/\s+/).slice(0, 64);
-    if (argv[0] && existsSync(argv[0]) && !argv.some((a) => a.length > 1024)) {
-      return { recipe: { kind: "argv", cwd: ctx.cwd, argv } };
-    }
-    return {
-      reason:
-        "该进程对应的可执行文件已不存在（可能是临时文件或已卸载），因此无法自动重启。请回到原来的终端重新启动。",
-    };
+  if (ctx.argv && ctx.cwd) {
+    return usable({ kind: "argv", cwd: ctx.cwd, argv: ctx.argv });
   }
 
   return {
     reason:
-      "该程序在运行时改写了进程名（例如 Next.js 会把进程显示为 next-server），系统层面的原始启动参数已被覆盖，无法自动重启。请回到原来的终端重新运行启动命令。",
+      "系统未提供可可靠恢复的原始参数（ps 命令文本不保留参数边界，框架也可能改写标题）。请回到原来的终端重新启动。",
   };
 }

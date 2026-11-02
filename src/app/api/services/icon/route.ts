@@ -4,6 +4,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getSeenService } from "@/lib/service-cache";
+import { checkRequest } from "@/lib/api-security";
 
 export const dynamic = "force-dynamic";
 
@@ -124,6 +125,8 @@ async function fetchAppIcon(appPath: string): Promise<Icon | null> {
 }
 
 export async function GET(request: Request) {
+  const denied = checkRequest(request);
+  if (denied) return denied;
   const port = Number(new URL(request.url).searchParams.get("port"));
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return NextResponse.json({ error: "端口无效" }, { status: 400 });

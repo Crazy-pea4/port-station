@@ -9,6 +9,7 @@ import { Footer } from "@/components/footer";
 import { LogoMark, RefreshIcon, SearchIcon } from "@/components/icons";
 
 const HIDDEN_KEY = "ps-hidden-ports";
+const EMPTY_SERVICES: ServiceInfo[] = [];
 
 type CategoryTab = "dev" | "app";
 
@@ -30,6 +31,8 @@ export default function Home() {
   const [startingPorts, setStartingPorts] = useState<number[]>([]);
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshVersion = useRef(0);
+  const token = useRef("");
 
   const showToast = useCallback((message: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -38,23 +41,29 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(HIDDEN_KEY);
-      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-      if (Array.isArray(parsed)) {
-        setHidden(parsed.filter((p): p is number => typeof p === "number"));
+    const timer = setTimeout(() => {
+      try {
+        const raw = localStorage.getItem(HIDDEN_KEY);
+        const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+        if (Array.isArray(parsed)) {
+          setHidden(parsed.filter((p): p is number => typeof p === "number"));
+        }
+      } catch {
+        // 忽略损坏或不可用的本地存储
       }
-    } catch {
-      // 忽略损坏的本地存储
-    }
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    const version = ++refreshVersion.current;
     if (!opts?.silent) setRefreshing(true);
     try {
       const res = await fetch("/api/services", { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const payload = (await res.json()) as ServicesPayload;
+      if (version !== refreshVersion.current) return;
+      token.current = payload.sessionToken;
       setData(payload);
       setLoadError(false);
       // 只有"晚于关闭时刻"的扫描再次发现该端口(说明服务被重新启动),才移除驻留卡;
@@ -66,14 +75,15 @@ export default function Home() {
         }),
       );
     } catch {
-      setLoadError(true);
+      if (version === refreshVersion.current) setLoadError(true);
     } finally {
-      if (!opts?.silent) setRefreshing(false);
+      if (version === refreshVersion.current) setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
+    const timer = setTimeout(() => void refresh(), 0);
+    return () => clearTimeout(timer);
   }, [refresh]);
 
   useEffect(() => {
@@ -85,23 +95,29 @@ export default function Home() {
 
   const hidePort = useCallback(
     (service: ServiceInfo) => {
-      setHidden((prev) => {
-        const next = [...new Set([...prev, service.port])];
+      const next = [...new Set([...hidden, service.port])];
+      setHidden(next);
+      try {
         localStorage.setItem(HIDDEN_KEY, JSON.stringify(next));
-        return next;
-      });
+      } catch {
+        // 存储受限时仍允许本次页面会话内隐藏
+      }
       showToast(`端口 ${service.port} 已隐藏，不再显示`);
     },
-    [showToast],
+    [hidden, showToast],
   );
 
   const restoreHidden = useCallback(() => {
     setHidden([]);
-    localStorage.removeItem(HIDDEN_KEY);
+    try {
+      localStorage.removeItem(HIDDEN_KEY);
+    } catch {
+      // 存储受限时仍更新当前页面
+    }
     showToast("已恢复显示全部端口");
   }, [showToast]);
 
-  const allServices = data?.services ?? [];
+  const allServices = data?.services ?? EMPTY_SERVICES;
 
   const categoryCounts = useMemo(
     () => ({
@@ -150,30 +166,33 @@ export default function Home() {
   }, [closedList, tab, hidden, query]);
 
   async function handleClose() {
-    if (!closing) return;
+    if (!closing || closeBusy) return;
     setCloseBusy(true);
     const snapshot = closing;
     try {
       const res = await fetch("/api/services/close", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ port: snapshot.port }),
+        headers: { "Content-Type": "application/json", "X-Port-Station-Token": token.current },
+        body: JSON.stringify({ port: snapshot.port, targets: snapshot.targets }),
       });
       const payload = (await res.json().catch(() => ({}))) as CloseResult & { error?: string };
       if (!res.ok) {
         showToast(payload.error ?? "关闭失败，请重试");
       } else if (payload.closed) {
         // 驻留在页面内存中,方便再次启动;刷新页面即消失
-        if (snapshot.category === "dev" || snapshot.restart) {
+        ++refreshVersion.current;
+        if (snapshot.category === "dev" || payload.restartId) {
+          const closedAt = Date.now();
+          const closedService = { ...snapshot, restartId: payload.restartId, restartable: !!payload.restartId, noRestartReason: payload.noRestartReason };
           setClosedList((prev) =>
-            [{ service: snapshot, closedAt: Date.now() }, ...prev.filter((c) => c.service.port !== snapshot.port)].slice(0, 12),
+            [{ service: closedService, closedAt }, ...prev.filter((c) => c.service.port !== snapshot.port)].slice(0, 12),
           );
         }
         // 立即从运行列表同步移除,防止驻留卡与运行卡短暂同现
         setData((prev) =>
           prev ? { ...prev, services: prev.services.filter((s) => s.port !== snapshot.port) } : prev,
         );
-        showToast(`端口 ${snapshot.port} 已关闭${payload.forced ? "（强制结束）" : ""}`);
+        showToast(payload.message);
       } else {
         showToast(payload.message || "关闭失败，请重试");
       }
@@ -187,13 +206,13 @@ export default function Home() {
   }
 
   async function handleRestart(service: ServiceInfo) {
-    if (!service.restart) return;
+    if (!service.restartId || startingPorts.includes(service.port)) return;
     setStartingPorts((prev) => [...prev, service.port]);
     try {
       const res = await fetch("/api/services/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ port: service.port, restart: service.restart }),
+        headers: { "Content-Type": "application/json", "X-Port-Station-Token": token.current },
+        body: JSON.stringify({ restartId: service.restartId }),
       });
       const payload = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
       showToast(res.ok ? (payload.message ?? "启动命令已发送") : (payload.error ?? "启动失败，请重试"));
@@ -339,11 +358,11 @@ export default function Home() {
                   onClose={(service) => setClosing(service)}
                 />
               ))}
-              {closedVisible.map(({ service }) => (
+              {closedVisible.map(({ service, closedAt }) => (
                 <ClosedServiceCard
                   key={`closed-${service.port}`}
                   service={service}
-                  closedAt={closedList.find((c) => c.service.port === service.port)?.closedAt ?? Date.now()}
+                  closedAt={closedAt}
                   starting={startingPorts.includes(service.port)}
                   onDiscard={(s) => setClosedList((prev) => prev.filter((c) => c.service.port !== s.port))}
                   onRestart={(s) => void handleRestart(s)}
